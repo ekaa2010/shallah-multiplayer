@@ -10,32 +10,21 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: "*",
+    origin: "*", // ممكن تخصصه لاحقًا
     methods: ["GET", "POST"],
   },
 });
 
-// 🧠 ذاكرة لتخزين الغرف واللاعبين
+// 🧠 تخزين الغرف واللاعبين
 let rooms = {};
 
 io.on("connection", (socket) => {
   console.log("✅ A user connected");
 
-  socket.on("disconnect", () => {
-    console.log("❌ A user disconnected");
-
-    // إزالة اللاعب من أي غرفة كان فيها
-    for (const roomId in rooms) {
-      rooms[roomId] = rooms[roomId].filter(p => p.id !== socket.id);
-      if (rooms[roomId].length === 0) {
-        delete rooms[roomId];
-      }
-    }
-  });
-
   // انضمام لاعب إلى غرفة
   socket.on("joinRoom", ({ roomId, playerId }) => {
     socket.join(roomId);
+    socket.roomId = roomId; // نخزن الـ roomId داخل الـ socket
     console.log(`Player ${playerId} joined room ${roomId}`);
 
     if (!rooms[roomId]) {
@@ -58,9 +47,28 @@ io.on("connection", (socket) => {
     }
   });
 
-  // إرسال حركة اللعب للطرف الآخر
+  // استقبال حركة اللعب من لاعب، وإرسالها لباقي اللاعبين في نفس الغرفة
   socket.on("send-move", (data) => {
-    socket.broadcast.emit("receive-move", data);
+    if (socket.roomId) {
+      socket.to(socket.roomId).emit("receive-move", data);
+    }
+  });
+
+  // قطع الاتصال
+  socket.on("disconnect", () => {
+    console.log("❌ A user disconnected");
+
+    const roomId = socket.roomId;
+    if (roomId && rooms[roomId]) {
+      rooms[roomId] = rooms[roomId].filter(p => p.id !== socket.id);
+      
+      if (rooms[roomId].length === 0) {
+        delete rooms[roomId];
+      } else {
+        // نبلغ اللاعب التاني إن خصمه خرج
+        socket.to(roomId).emit("opponent-disconnected");
+      }
+    }
   });
 });
 
