@@ -1,12 +1,14 @@
 const express = require("express");
 const app = express();
-const http = require("http").Server(app);
+const http = require("http");
 const cors = require("cors");
 const { Server } = require("socket.io");
 
 app.use(cors());
 
-const io = new Server(http, {
+const server = http.createServer(app); // ✅ هنا بنعمل السيرفر
+
+const io = new Server(server, {
   cors: {
     origin: "*",
     methods: ["GET", "POST"],
@@ -25,6 +27,7 @@ io.on("connection", (socket) => {
   });
 });
 
-http.listen(3000, () => {
-  console.log("🚀 Server is running on port 3000");
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`🚀 Server is running on port ${PORT}`);
 });
