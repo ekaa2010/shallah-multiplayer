@@ -10,7 +10,7 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: "*", // ممكن تخصصه لاحقًا
+    origin: "*",
     methods: ["GET", "POST"],
   },
 });
@@ -24,11 +24,12 @@ io.on("connection", (socket) => {
   // انضمام لاعب إلى غرفة
   socket.on("joinRoom", ({ roomId, playerId }) => {
     socket.join(roomId);
-    socket.roomId = roomId; // نخزن الـ roomId داخل الـ socket
+    socket.roomId = roomId;
     console.log(`Player ${playerId} joined room ${roomId}`);
 
     if (!rooms[roomId]) {
       rooms[roomId] = [];
+      console.log(`🆕 Room ${roomId} created by player ${playerId}`);
     }
 
     // منع التكرار
@@ -36,18 +37,30 @@ io.on("connection", (socket) => {
       rooms[roomId].push({ id: socket.id, playerId });
     }
 
-    // لما يبقى فيه لاعبين في الغرفة، نبدأ اللعب
+    // لما يبقى فيه لاعبين
     if (rooms[roomId].length === 2) {
-      console.log(`🎮 Starting game in room ${roomId}`);
-      io.to(roomId).emit("startGame", {
-        playerCount: 2,
-        targetScore: 101,
-        startingPlayerId: Math.floor(Math.random() * 2),
-      });
+      console.log(`⌛ Room ${roomId} is full. Starting countdown...`);
+      io.to(roomId).emit("waitingStart", { countdown: 5 });
+
+      let secondsLeft = 5;
+      const interval = setInterval(() => {
+        secondsLeft--;
+        io.to(roomId).emit("waitingUpdate", { countdown: secondsLeft });
+
+        if (secondsLeft <= 0) {
+          clearInterval(interval);
+          console.log(`🎮 Starting game in room ${roomId}`);
+          io.to(roomId).emit("startGame", {
+            playerCount: 2,
+            targetScore: 101,
+            startingPlayerId: Math.floor(Math.random() * 2),
+          });
+        }
+      }, 1000);
     }
   });
 
-  // استقبال حركة اللعب من لاعب، وإرسالها لباقي اللاعبين في نفس الغرفة
+  // استقبال حركة اللعب
   socket.on("send-move", (data) => {
     if (socket.roomId) {
       socket.to(socket.roomId).emit("receive-move", data);
@@ -61,11 +74,10 @@ io.on("connection", (socket) => {
     const roomId = socket.roomId;
     if (roomId && rooms[roomId]) {
       rooms[roomId] = rooms[roomId].filter(p => p.id !== socket.id);
-      
+
       if (rooms[roomId].length === 0) {
         delete rooms[roomId];
       } else {
-        // نبلغ اللاعب التاني إن خصمه خرج
         socket.to(roomId).emit("opponent-disconnected");
       }
     }
