@@ -22,22 +22,24 @@ io.on("connection", (socket) => {
   console.log("✅ A user connected");
 
   // انضمام لاعب إلى غرفة
-  socket.on("joinRoom", ({ roomId, playerId }) => {
+  socket.on("joinRoom", ({ roomId }) => {
     socket.join(roomId);
     socket.roomId = roomId;
-    console.log(`Player ${playerId} joined room ${roomId}`);
 
     if (!rooms[roomId]) {
       rooms[roomId] = [];
-      console.log(`🆕 Room ${roomId} created by player ${playerId}`);
+      console.log(`🆕 Room ${roomId} created`);
     }
 
-    // منع التكرار
-    if (!rooms[roomId].some(p => p.id === socket.id)) {
-      rooms[roomId].push({ id: socket.id, playerId });
-    }
+    const playerId = rooms[roomId].length; // 0 للأول، 1 للتاني
+    rooms[roomId].push({ id: socket.id, playerId });
 
-    // لما يبقى فيه لاعبين
+    console.log(`Player ${playerId} joined room ${roomId}`);
+
+    // إرسال playerId للكلاينت
+    io.to(socket.id).emit("playerIdAssigned", { playerId });
+
+    // لما الغرفة تكمل لاعبين
     if (rooms[roomId].length === 2) {
       console.log(`⌛ Room ${roomId} is full. Starting countdown...`);
       io.to(roomId).emit("waitingStart", { countdown: 5 });
