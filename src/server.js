@@ -7,13 +7,23 @@ const { Server } = require("socket.io");
 app.use(cors());
 
 const server = http.createServer(app);
-
 const io = new Server(server, {
   cors: {
-    origin: "*",
+    origin: "*", // يمكن تخصيصه لاحقاً
     methods: ["GET", "POST"],
   },
 });
+
+// دالة لتوليد كود غرفة عشوائي
+function generateRoomCode() {
+  const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = '';
+  const length = 6; // يمكن تعديل الطول حسب الحاجة
+  for (let i = 0; i < length; i++) {
+    result += characters.charAt(Math.floor(Math.random() * characters.length));
+  }
+  return result;
+}
 
 // 🧠 تخزين الغرف واللاعبين
 let rooms = {};
@@ -21,65 +31,26 @@ let rooms = {};
 io.on("connection", (socket) => {
   console.log("✅ A user connected");
 
-  // انشاء غرفة جديدة
-  socket.on("createRoom", ({ playerId }) => {
-    // generate unique roomId
-    const roomId = generateRoomCode(); // مثلا "BOOM23" 
-
-    // تخزين الغرفة
+  // انضمام لاعب إلى غرفة
+  socket.on("joinRoom", ({ roomId }) => {
     socket.join(roomId);
     socket.roomId = roomId;
 
+    // تحقق إذا كانت الغرفة موجودة، إذا لم تكن موجودة نقوم بإنشائها
     if (!rooms[roomId]) {
       rooms[roomId] = [];
-      console.log(`🆕 Room ${roomId} created by player ${playerId}`);
+      console.log(`🆕 Room ${roomId} created`);
     }
 
-    // playerId هو 0 لأنه أول واحد دخل
+    const playerId = rooms[roomId].length; // 0 للأول، 1 للتاني
     rooms[roomId].push({ id: socket.id, playerId });
 
-    console.log(`Player ${playerId} created room ${roomId}`);
+    console.log(`Player ${playerId} joined room ${roomId}`);
 
-    // ارسال كود الغرفة و playerId للعميل
-    io.to(socket.id).emit("roomCreated", { roomId, playerId });
-
-    // إرسال أن اللاعب قد تم إنشاؤه بنجاح
+    // إرسال playerId للكلاينت
     io.to(socket.id).emit("playerIdAssigned", { playerId });
 
-    // انتظر اللاعب الثاني للانضمام
-    io.to(socket.id).emit("waiting", { message: "Waiting for an opponent..." });
-  });
-
-  // انضمام لاعب لغرفة
-  socket.on("joinRoom", ({ roomId }) => {
-    if (!rooms[roomId]) {
-      // لو الغرفة مش موجودة، نرفض الانضمام
-      console.log(`❌ Room ${roomId} does not exist`);
-      io.to(socket.id).emit("roomNotFound", { message: "Room not found!" });
-      return;
-    }
-
-    // لو الغرفة مليانة (2 لاعبين)، نرفض انضمام لاعب ثالث
-    if (rooms[roomId].length === 2) {
-      console.log(`❌ Room ${roomId} is full`);
-      io.to(socket.id).emit("roomFull", { message: "Room is full!" });
-      return;
-    }
-
-    // إضافة اللاعب للغرفة
-    socket.join(roomId);
-    socket.roomId = roomId;
-    const playerId = rooms[roomId].length; // تعيين playerId: 0 أو 1
-
-    rooms[roomId].push({ id: socket.id, playerId });
-
-    console.log(`✅ Player ${playerId} joined room ${roomId}`);
-
-    // إرسال playerId للعميل
-    io.to(socket.id).emit("playerIdAssigned", { playerId });
-    io.to(socket.id).emit("roomJoined", { roomId });
-
-    // عندما يتم انضمام اللاعب الثاني، نبدأ العد التنازلي
+    // لما الغرفة تكمل لاعبين
     if (rooms[roomId].length === 2) {
       console.log(`⌛ Room ${roomId} is full. Starting countdown...`);
       io.to(roomId).emit("waitingStart", { countdown: 5 });
