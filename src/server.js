@@ -19,35 +19,69 @@ const io = new Server(server, {
 let rooms = {};
 
 io.on("connection", (socket) => {
-  console.log("✅ A user connected:", socket.id);
+  console.log("✅ A user connected");
 
-  // انضمام لاعب إلى غرفة
-  socket.on("joinRoom", ({ roomId }) => {
+  // انشاء غرفة جديدة
+  socket.on("createRoom", ({ playerId }) => {
+    // generate unique roomId
+    const roomId = generateRoomCode(); // مثلا "BOOM23" 
+
+    // تخزين الغرفة
     socket.join(roomId);
     socket.roomId = roomId;
 
-    // لو الغرفة مش موجودة، أنشئها
     if (!rooms[roomId]) {
       rooms[roomId] = [];
-      console.log(`🆕 Room ${roomId} created`);
+      console.log(`🆕 Room ${roomId} created by player ${playerId}`);
     }
 
-    // امنع تكرار نفس اللاعب
-    if (!rooms[roomId].some(p => p.id === socket.id)) {
-      const playerId = rooms[roomId].length; // 0 للأول، 1 للتاني
-      rooms[roomId].push({ id: socket.id, playerId });
+    // playerId هو 0 لأنه أول واحد دخل
+    rooms[roomId].push({ id: socket.id, playerId });
 
-      console.log(`🎮 Player ${playerId} joined room ${roomId}`);
-      console.log(`👥 Players now in room ${roomId}: ${rooms[roomId].map(p => p.playerId).join(", ")}`);
+    console.log(`Player ${playerId} created room ${roomId}`);
 
-      // إرسال playerId للكلاينت
-      io.to(socket.id).emit("playerIdAssigned", { playerId });
+    // ارسال كود الغرفة و playerId للعميل
+    io.to(socket.id).emit("roomCreated", { roomId, playerId });
+
+    // إرسال أن اللاعب قد تم إنشاؤه بنجاح
+    io.to(socket.id).emit("playerIdAssigned", { playerId });
+
+    // انتظر اللاعب الثاني للانضمام
+    io.to(socket.id).emit("waiting", { message: "Waiting for an opponent..." });
+  });
+
+  // انضمام لاعب لغرفة
+  socket.on("joinRoom", ({ roomId }) => {
+    if (!rooms[roomId]) {
+      // لو الغرفة مش موجودة، نرفض الانضمام
+      console.log(`❌ Room ${roomId} does not exist`);
+      io.to(socket.id).emit("roomNotFound", { message: "Room not found!" });
+      return;
     }
 
-    // لما الغرفة تكمل لاعبين
+    // لو الغرفة مليانة (2 لاعبين)، نرفض انضمام لاعب ثالث
+    if (rooms[roomId].length === 2) {
+      console.log(`❌ Room ${roomId} is full`);
+      io.to(socket.id).emit("roomFull", { message: "Room is full!" });
+      return;
+    }
+
+    // إضافة اللاعب للغرفة
+    socket.join(roomId);
+    socket.roomId = roomId;
+    const playerId = rooms[roomId].length; // تعيين playerId: 0 أو 1
+
+    rooms[roomId].push({ id: socket.id, playerId });
+
+    console.log(`✅ Player ${playerId} joined room ${roomId}`);
+
+    // إرسال playerId للعميل
+    io.to(socket.id).emit("playerIdAssigned", { playerId });
+    io.to(socket.id).emit("roomJoined", { roomId });
+
+    // عندما يتم انضمام اللاعب الثاني، نبدأ العد التنازلي
     if (rooms[roomId].length === 2) {
       console.log(`⌛ Room ${roomId} is full. Starting countdown...`);
-
       io.to(roomId).emit("waitingStart", { countdown: 5 });
 
       let secondsLeft = 5;
@@ -57,7 +91,7 @@ io.on("connection", (socket) => {
 
         if (secondsLeft <= 0) {
           clearInterval(interval);
-          console.log(`🚀 Starting game in room ${roomId}`);
+          console.log(`🎮 Starting game in room ${roomId}`);
           io.to(roomId).emit("startGame", {
             playerCount: 2,
             targetScore: 101,
@@ -77,7 +111,7 @@ io.on("connection", (socket) => {
 
   // قطع الاتصال
   socket.on("disconnect", () => {
-    console.log("❌ A user disconnected:", socket.id);
+    console.log("❌ A user disconnected");
 
     const roomId = socket.roomId;
     if (roomId && rooms[roomId]) {
@@ -85,10 +119,8 @@ io.on("connection", (socket) => {
 
       if (rooms[roomId].length === 0) {
         delete rooms[roomId];
-        console.log(`🗑️ Room ${roomId} deleted`);
       } else {
         socket.to(roomId).emit("opponent-disconnected");
-        console.log(`⚠️ Player left. Remaining in room ${roomId}: ${rooms[roomId].map(p => p.playerId).join(", ")}`);
       }
     }
   });
