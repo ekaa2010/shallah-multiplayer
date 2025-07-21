@@ -1,157 +1,149 @@
 const express = require("express");
-const app = express();
 const http = require("http");
-const cors = require("cors");
 const { Server } = require("socket.io");
+const cors = require("cors");
 
+const app = express();
 app.use(cors());
 
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*",
-    methods: ["GET", "POST"],
-  },
+    origin: "*", // allow all for testing
+    methods: ["GET", "POST"]
+  }
 });
 
-// 🧠 تخزين الغرف
-let rooms = {};
-
-function generateRoomCode() {
-  const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let code = '';
-  for (let i = 0; i < 6; i++) {
-    code += characters.charAt(Math.floor(Math.random() * characters.length));
-  }
-  return code;
-}
-
-// 🎴 توليد الديك الكامل (Standard 52-card deck)
-function generateDeck() {
-  const suits = ['♠', '♥', '♦', '♣'];
-  const ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
-  const deck = [];
-  for (const suit of suits) {
-    for (const rank of ranks) {
-      deck.push({ suit, rank });
-    }
-  }
-  return deck;
-}
-
-// 🔀 خلط الورق
-function shuffle(array) {
-  const shuffled = [...array];
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-  }
-  return shuffled;
-}
+const rooms = {};
 
 io.on("connection", (socket) => {
-  console.log("✅ A user connected");
+  console.log("✅ A user connected:", socket.id);
+
+  socket.on("createRoom", ({ playerId }) => {
+    const roomId = generateRoomId();
+    rooms[roomId] = {
+      players: [socket],
+      playerIds: [playerId]
+    };
+    socket.join(roomId);
+    console.log(`✅ Room created: ${roomId} by player ${playerId}`);
+    socket.emit("roomCreated", { roomId, playerId });
+  });
 
   socket.on("joinRoom", ({ roomId }) => {
+    const room = rooms[roomId];
+    if (!room) {
+      socket.emit("roomNotFound", { message: "Room not found." });
+      return;
+    }
+    if (room.players.length >= 2) {
+      socket.emit("roomFull", { message: "Room is full." });
+      return;
+    }
+
+    room.players.push(socket);
     socket.join(roomId);
-    socket.roomId = roomId;
 
-    if (!rooms[roomId]) {
-      rooms[roomId] = [];
-      console.log(`🆕 Room ${roomId} created`);
+    const playerId = 1; // second player always gets 1
+    room.playerIds.push(playerId);
+    socket.emit("playerIdAssigned", { playerId });
+    socket.emit("roomJoined", { roomId });
+    console.log(`🚪 Player joined room ${roomId}`);
+
+    // Notify host that a player has joined
+    const hostSocket = room.players[0];
+    if (hostSocket) {
+      hostSocket.emit("playerJoined", { playerCount: 2 });
     }
 
-    const playerId = rooms[roomId].length;
-    rooms[roomId].push({ id: socket.id, playerId });
-
-    console.log(`👤 Player ${playerId} joined room ${roomId}`);
-    io.to(socket.id).emit("playerIdAssigned", { playerId });
-
-    if (rooms[roomId].length === 2) {
-      console.log(`⌛ Room ${roomId} full. Starting countdown...`);
-
-      io.to(roomId).emit("waitingStart", { countdown: 5 });
-
-      let countdown = 5;
-      const interval = setInterval(() => {
-        countdown--;
-        io.to(roomId).emit("waitingUpdate", { countdown });
-
-        if (countdown <= 0) {
-          clearInterval(interval);
-
-          const startingPlayerId = Math.floor(Math.random() * 2);
-
-          // 🃏 توزيع الأوراق
-          let fullDeck = shuffle(generateDeck());
-          const playerHands = [[], []];
-          const playerGroundPiles = [[], []];
-
-          // 4 أوراق للأرض عند اللاعب 0
-          playerGroundPiles[0] = fullDeck.splice(0, 4);
-
-          // توزيع 6 أوراق على كل لاعب كبداية
-          for (let i = 0; i < 6; i++) {
-            playerHands[0].push(fullDeck.pop());
-            playerHands[1].push(fullDeck.pop());
-          }
-
-          console.log(`🎮 Game starting in room ${roomId}`);
-          io.to(roomId).emit("startGame", {
-            playerCount: 2,
-            targetScore: 101,
-            startingPlayerId,
-            deck: fullDeck,
-            playerHands,
-            playerGroundPiles,
-          });
-        }
-      }, 1000);
-    }
+    // Start countdown for all players
+    startCountdown(roomId, 3);
   });
 
-  // 🎯 إرسال الحركة
-  socket.on("send-move", (data) => {
-    if (socket.roomId) {
-      socket.to(socket.roomId).emit("receive-move", data);
-    }
+  socket.on("waitingStart", ({ countdown }) => {
+    // should be handled automatically by server after both players join
   });
 
-  // 🧾 نهاية الجولة
-  socket.on("roundEnd", (payload) => {
-    console.log(`📦 Round ended in room ${socket.roomId}`);
-    socket.to(socket.roomId).emit("roundEnd", payload);
+  socket.on("startGame", (initialState) => {
+    const roomId = initialState.roomId;
+    console.log("🟢 Game initialized by host. Broadcasting startGame to room:", roomId);
+    io.to(roomId).emit("startGame", initialState);
   });
 
-  // ♻️ بدء جولة جديدة
-  socket.on("newRound", (payload) => {
-    console.log(`🔄 New round in room ${socket.roomId}`);
-    socket.to(socket.roomId).emit("newRound", payload);
+  socket.on("restartGame", (newGameState) => {
+    const roomId = newGameState.roomId;
+    console.log("🔁 Restarting game for room:", roomId);
+    io.to(roomId).emit("restartGame", newGameState);
   });
 
-  // 🏁 نهاية اللعبة
-  socket.on("gameEnd", (payload) => {
-    console.log(`🏁 Game ended in room ${socket.roomId}`);
-    io.to(socket.roomId).emit("gameEnd", payload);
+  socket.on("sendMove", ({ card, roomId }) => {
+    socket.to(roomId).emit("receiveMove", { card, actingPlayerId: getPlayerId(roomId, socket) });
   });
 
-  // ❌ فصل اللاعب
-  socket.on("disconnect", () => {
-    console.log("❌ A user disconnected");
+  socket.on("updateState", ({ gameState, roomId }) => {
+    socket.to(roomId).emit("stateUpdate", gameState);
+  });
 
-    const roomId = socket.roomId;
-    if (roomId && rooms[roomId]) {
-      rooms[roomId] = rooms[roomId].filter(p => p.id !== socket.id);
-      if (rooms[roomId].length === 0) {
+  socket.on("newRound", ({ roundData, roomId }) => {
+    io.to(roomId).emit("newRound", roundData);
+  });
+
+  socket.on("roundEnd", ({ roundResult, roomId }) => {
+    io.to(roomId).emit("roundEnd", roundResult);
+  });
+
+  socket.on("gameEnd", ({ gameResult, roomId }) => {
+    io.to(roomId).emit("gameEnd", gameResult);
+  });
+
+  socket.on("disconnecting", () => {
+    const roomsJoined = Array.from(socket.rooms).filter(r => r !== socket.id);
+    for (const roomId of roomsJoined) {
+      const room = rooms[roomId];
+      if (room) {
+        io.to(roomId).emit("opponentDisconnected");
         delete rooms[roomId];
-      } else {
-        socket.to(roomId).emit("opponent-disconnected");
+        console.log("⚠️ Opponent disconnected from room", roomId);
       }
     }
   });
 });
 
+// -------- Helpers --------
+
+function generateRoomId() {
+  return Math.random().toString(36).substr(2, 6).toUpperCase();
+}
+
+function getPlayerId(roomId, socket) {
+  const room = rooms[roomId];
+  if (!room) return -1;
+  return room.players.indexOf(socket);
+}
+
+function startCountdown(roomId, seconds) {
+  let remaining = seconds;
+  const interval = setInterval(() => {
+    if (remaining <= 0) {
+      clearInterval(interval);
+      io.to(roomId).emit("waitingUpdate", { countdown: 0 });
+
+      // Let the host emit startGame with initial state
+      const hostSocket = rooms[roomId]?.players[0];
+      if (hostSocket) {
+        hostSocket.emit("waitingStart", { countdown: 0 });
+        // NOTE: gameScene on host should send 'startGame' after countdown
+      }
+
+    } else {
+      io.to(roomId).emit("waitingStart", { countdown: remaining });
+      remaining--;
+    }
+  }, 1000);
+}
+
+// -------- Start Server --------
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
