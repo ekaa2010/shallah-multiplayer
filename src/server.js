@@ -14,35 +14,43 @@ const io = new Server(server, {
   },
 });
 
-// 🎴 أدوات الكوتشينة
-function generateDeck() {
-  const suits = ["♠", "♥", "♦", "♣"];
-  const ranks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
-  const deck = [];
+// 🧠 تخزين الغرف
+let rooms = {};
 
+function generateRoomCode() {
+  const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += characters.charAt(Math.floor(Math.random() * characters.length));
+  }
+  return code;
+}
+
+// 🎴 توليد الديك الكامل (Standard 52-card deck)
+function generateDeck() {
+  const suits = ['♠', '♥', '♦', '♣'];
+  const ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+  const deck = [];
   for (const suit of suits) {
     for (const rank of ranks) {
       deck.push({ suit, rank });
     }
   }
-
   return deck;
 }
 
+// 🔀 خلط الورق
 function shuffle(array) {
-  const copy = [...array];
-  for (let i = copy.length - 1; i > 0; i--) {
+  const shuffled = [...array];
+  for (let i = shuffled.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
   }
-  return copy;
+  return shuffled;
 }
 
-// 🧠 الغرف
-let rooms = {};
-
 io.on("connection", (socket) => {
-  console.log("✅ User connected");
+  console.log("✅ A user connected");
 
   socket.on("joinRoom", ({ roomId }) => {
     socket.join(roomId);
@@ -71,57 +79,67 @@ io.on("connection", (socket) => {
 
         if (countdown <= 0) {
           clearInterval(interval);
-          console.log(`🎮 Starting game in room ${roomId}`);
 
           const startingPlayerId = Math.floor(Math.random() * 2);
-          const fullDeck = shuffle(generateDeck());
+
+          // 🃏 توزيع الأوراق
+          let fullDeck = shuffle(generateDeck());
           const playerHands = [[], []];
           const playerGroundPiles = [[], []];
 
-          // 4 أوراق أرضية عند اللاعب 0
+          // 4 أوراق للأرض عند اللاعب 0
           playerGroundPiles[0] = fullDeck.splice(0, 4);
 
-          // توزيع 6 أوراق على كل لاعب
+          // توزيع 6 أوراق على كل لاعب كبداية
           for (let i = 0; i < 6; i++) {
-            playerHands[0].push(fullDeck.shift());
-            playerHands[1].push(fullDeck.shift());
+            playerHands[0].push(fullDeck.pop());
+            playerHands[1].push(fullDeck.pop());
           }
 
+          console.log(`🎮 Game starting in room ${roomId}`);
           io.to(roomId).emit("startGame", {
             playerCount: 2,
             targetScore: 101,
             startingPlayerId,
+            deck: fullDeck,
             playerHands,
             playerGroundPiles,
-            deck: fullDeck,
           });
         }
       }, 1000);
     }
   });
 
+  // 🎯 إرسال الحركة
   socket.on("send-move", (data) => {
     if (socket.roomId) {
       socket.to(socket.roomId).emit("receive-move", data);
     }
   });
 
+  // 🧾 نهاية الجولة
   socket.on("roundEnd", (payload) => {
+    console.log(`📦 Round ended in room ${socket.roomId}`);
     socket.to(socket.roomId).emit("roundEnd", payload);
   });
 
+  // ♻️ بدء جولة جديدة
   socket.on("newRound", (payload) => {
+    console.log(`🔄 New round in room ${socket.roomId}`);
     socket.to(socket.roomId).emit("newRound", payload);
   });
 
+  // 🏁 نهاية اللعبة
   socket.on("gameEnd", (payload) => {
+    console.log(`🏁 Game ended in room ${socket.roomId}`);
     io.to(socket.roomId).emit("gameEnd", payload);
   });
 
+  // ❌ فصل اللاعب
   socket.on("disconnect", () => {
-    const roomId = socket.roomId;
-    console.log("❌ User disconnected");
+    console.log("❌ A user disconnected");
 
+    const roomId = socket.roomId;
     if (roomId && rooms[roomId]) {
       rooms[roomId] = rooms[roomId].filter(p => p.id !== socket.id);
       if (rooms[roomId].length === 0) {
