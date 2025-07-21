@@ -46,14 +46,19 @@ io.on("connection", (socket) => {
 
     if (rooms[roomId].length === 2) {
       console.log(`⌛ Room ${roomId} full. Starting countdown...`);
+
+      // 1. Emit countdown start
       io.to(roomId).emit("waitingStart", { countdown: 5 });
 
+      // 2. Emit countdown updates every second
       let countdown = 5;
       const interval = setInterval(() => {
         countdown--;
         io.to(roomId).emit("waitingUpdate", { countdown });
+
         if (countdown <= 0) {
           clearInterval(interval);
+
           const startingPlayerId = Math.floor(Math.random() * 2);
           console.log(`🎮 Game starting in room ${roomId}`);
           io.to(roomId).emit("startGame", {
