@@ -14,33 +14,21 @@ const io = new Server(server, {
   },
 });
 
-let rooms = {};
-
-function generateRoomCode() {
-  const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let code = '';
-  for (let i = 0; i < 6; i++) {
-    code += characters.charAt(Math.floor(Math.random() * characters.length));
-  }
-  return code;
-}
-
-// 🔁 Deck generator
-function createFullDeck() {
-  const suits = ['♠', '♥', '♦', '♣'];
-  const ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+// 🎴 أدوات الكوتشينة
+function generateDeck() {
+  const suits = ["♠", "♥", "♦", "♣"];
+  const ranks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
   const deck = [];
 
   for (const suit of suits) {
     for (const rank of ranks) {
-      deck.push({ rank, suit });
+      deck.push({ suit, rank });
     }
   }
 
   return deck;
 }
 
-// 🔀 Shuffle cards
 function shuffle(array) {
   const copy = [...array];
   for (let i = copy.length - 1; i > 0; i--) {
@@ -50,8 +38,11 @@ function shuffle(array) {
   return copy;
 }
 
+// 🧠 الغرف
+let rooms = {};
+
 io.on("connection", (socket) => {
-  console.log("✅ A user connected");
+  console.log("✅ User connected");
 
   socket.on("joinRoom", ({ roomId }) => {
     socket.join(roomId);
@@ -70,6 +61,7 @@ io.on("connection", (socket) => {
 
     if (rooms[roomId].length === 2) {
       console.log(`⌛ Room ${roomId} full. Starting countdown...`);
+
       io.to(roomId).emit("waitingStart", { countdown: 5 });
 
       let countdown = 5;
@@ -79,21 +71,29 @@ io.on("connection", (socket) => {
 
         if (countdown <= 0) {
           clearInterval(interval);
+          console.log(`🎮 Starting game in room ${roomId}`);
 
-          // 🔁 Generate starting state
-          const deck = shuffle(createFullDeck());
-          const playerHands = [deck.splice(0, 6), deck.splice(0, 6)];
-          const playerGroundPiles = [deck.splice(0, 2), deck.splice(0, 2)];
           const startingPlayerId = Math.floor(Math.random() * 2);
+          const fullDeck = shuffle(generateDeck());
+          const playerHands = [[], []];
+          const playerGroundPiles = [[], []];
 
-          console.log(`🎮 Game starting in room ${roomId}`);
+          // 4 أوراق أرضية عند اللاعب 0
+          playerGroundPiles[0] = fullDeck.splice(0, 4);
+
+          // توزيع 6 أوراق على كل لاعب
+          for (let i = 0; i < 6; i++) {
+            playerHands[0].push(fullDeck.shift());
+            playerHands[1].push(fullDeck.shift());
+          }
+
           io.to(roomId).emit("startGame", {
             playerCount: 2,
             targetScore: 101,
             startingPlayerId,
             playerHands,
-            deck,
-            playerGroundPiles
+            playerGroundPiles,
+            deck: fullDeck,
           });
         }
       }, 1000);
@@ -107,23 +107,21 @@ io.on("connection", (socket) => {
   });
 
   socket.on("roundEnd", (payload) => {
-    console.log(`📦 Round ended in room ${socket.roomId}`);
     socket.to(socket.roomId).emit("roundEnd", payload);
   });
 
   socket.on("newRound", (payload) => {
-    console.log(`🔄 New round in room ${socket.roomId}`);
     socket.to(socket.roomId).emit("newRound", payload);
   });
 
   socket.on("gameEnd", (payload) => {
-    console.log(`🏁 Game ended in room ${socket.roomId}`);
     io.to(socket.roomId).emit("gameEnd", payload);
   });
 
   socket.on("disconnect", () => {
-    console.log("❌ A user disconnected");
     const roomId = socket.roomId;
+    console.log("❌ User disconnected");
+
     if (roomId && rooms[roomId]) {
       rooms[roomId] = rooms[roomId].filter(p => p.id !== socket.id);
       if (rooms[roomId].length === 0) {
