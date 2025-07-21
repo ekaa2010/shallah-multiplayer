@@ -14,7 +14,6 @@ const io = new Server(server, {
   },
 });
 
-// 🧠 تخزين الغرف
 let rooms = {};
 
 function generateRoomCode() {
@@ -24,6 +23,31 @@ function generateRoomCode() {
     code += characters.charAt(Math.floor(Math.random() * characters.length));
   }
   return code;
+}
+
+// 🔁 Deck generator
+function createFullDeck() {
+  const suits = ['♠', '♥', '♦', '♣'];
+  const ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+  const deck = [];
+
+  for (const suit of suits) {
+    for (const rank of ranks) {
+      deck.push({ rank, suit });
+    }
+  }
+
+  return deck;
+}
+
+// 🔀 Shuffle cards
+function shuffle(array) {
+  const copy = [...array];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
 }
 
 io.on("connection", (socket) => {
@@ -46,11 +70,8 @@ io.on("connection", (socket) => {
 
     if (rooms[roomId].length === 2) {
       console.log(`⌛ Room ${roomId} full. Starting countdown...`);
-
-      // 1. Emit countdown start
       io.to(roomId).emit("waitingStart", { countdown: 5 });
 
-      // 2. Emit countdown updates every second
       let countdown = 5;
       const interval = setInterval(() => {
         countdown--;
@@ -59,19 +80,26 @@ io.on("connection", (socket) => {
         if (countdown <= 0) {
           clearInterval(interval);
 
+          // 🔁 Generate starting state
+          const deck = shuffle(createFullDeck());
+          const playerHands = [deck.splice(0, 6), deck.splice(0, 6)];
+          const playerGroundPiles = [deck.splice(0, 2), deck.splice(0, 2)];
           const startingPlayerId = Math.floor(Math.random() * 2);
+
           console.log(`🎮 Game starting in room ${roomId}`);
           io.to(roomId).emit("startGame", {
             playerCount: 2,
             targetScore: 101,
             startingPlayerId,
+            playerHands,
+            deck,
+            playerGroundPiles
           });
         }
       }, 1000);
     }
   });
 
-  // نقل أحداث الجيم بين اللاعبين
   socket.on("send-move", (data) => {
     if (socket.roomId) {
       socket.to(socket.roomId).emit("receive-move", data);
@@ -95,7 +123,6 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     console.log("❌ A user disconnected");
-
     const roomId = socket.roomId;
     if (roomId && rooms[roomId]) {
       rooms[roomId] = rooms[roomId].filter(p => p.id !== socket.id);
