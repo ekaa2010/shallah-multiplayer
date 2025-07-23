@@ -30,120 +30,56 @@ io.on("connection", (socket) => {
     socket.emit("roomCreated", { roomId, playerId });
   });
 
-  socket.on("joinRoom", ({ roomId }) => {
+  socket.on("joinRoom", ({ roomId, playerId }) => {
     const room = rooms[roomId];
-    if (!room) {
-      socket.emit("roomNotFound", { message: "Room not found." });
-      return;
+    if (room && room.players.length === 1) {
+      room.players.push(socket);
+      room.playerIds.push(playerId);
+      socket.join(roomId);
+      console.log(`✅ Player joined room ${roomId}`);
+
+      room.players.forEach(p =>
+        p.emit("playerJoined", { roomId, playerId })
+      );
+
+      // Start countdown for game
+      startCountdown(io, roomId);
+    } else {
+      socket.emit("joinError", "Room full or does not exist.");
     }
-    if (room.players.length >= 2) {
-      socket.emit("roomFull", { message: "Room is full." });
-      return;
-    }
-
-    room.players.push(socket);
-    socket.join(roomId);
-
-    const playerId = 1; // second player always gets 1
-    room.playerIds.push(playerId);
-    socket.emit("playerIdAssigned", { playerId });
-    socket.emit("roomJoined", { roomId });
-    console.log(`🚪 Player joined room ${roomId}`);
-
-    // Notify host that a player has joined
-    const hostSocket = room.players[0];
-    if (hostSocket) {
-      hostSocket.emit("playerJoined", { playerCount: 2 });
-    }
-
-    // Start countdown for all players
-    startCountdown(roomId, 3);
   });
 
-  socket.on("waitingStart", ({ countdown }) => {
-    // should be handled automatically by server after both players join
-  });
-
-  socket.on("startGame", (initialState) => {
-    const roomId = initialState.roomId;
-    console.log("🟢 Game initialized by host. Broadcasting startGame to room:", roomId);
-    io.to(roomId).emit("startGame", initialState);
-  });
-
-  socket.on("restartGame", (newGameState) => {
-    const roomId = newGameState.roomId;
-    console.log("🔁 Restarting game for room:", roomId);
-    io.to(roomId).emit("restartGame", newGameState);
-  });
-
-  socket.on("sendMove", ({ card, roomId }) => {
-    socket.to(roomId).emit("receiveMove", { card, actingPlayerId: getPlayerId(roomId, socket) });
-  });
-
-  socket.on("updateState", ({ gameState, roomId }) => {
-    socket.to(roomId).emit("stateUpdate", gameState);
-  });
-
-  socket.on("newRound", ({ roundData, roomId }) => {
-    io.to(roomId).emit("newRound", roundData);
-  });
-
-  socket.on("roundEnd", ({ roundResult, roomId }) => {
-    io.to(roomId).emit("roundEnd", roundResult);
-  });
-
-  socket.on("gameEnd", ({ gameResult, roomId }) => {
-    io.to(roomId).emit("gameEnd", gameResult);
-  });
-
-  socket.on("disconnecting", () => {
-    const roomsJoined = Array.from(socket.rooms).filter(r => r !== socket.id);
-    for (const roomId of roomsJoined) {
+  socket.on("disconnect", () => {
+    console.log("⚠️ A user disconnected");
+    for (const roomId in rooms) {
       const room = rooms[roomId];
-      if (room) {
-        io.to(roomId).emit("opponentDisconnected");
+      room.players = room.players.filter(p => p.id !== socket.id);
+      if (room.players.length === 0) {
         delete rooms[roomId];
-        console.log("⚠️ Opponent disconnected from room", roomId);
+      } else {
+        io.to(roomId).emit("opponentDisconnected");
       }
     }
   });
 });
 
-// -------- Helpers --------
-
-function generateRoomId() {
-  return Math.random().toString(36).substr(2, 6).toUpperCase();
-}
-
-function getPlayerId(roomId, socket) {
-  const room = rooms[roomId];
-  if (!room) return -1;
-  return room.players.indexOf(socket);
-}
-
-function startCountdown(roomId, seconds) {
-  let remaining = seconds;
+function startCountdown(io, roomId) {
+  let countdown = 3;
   const interval = setInterval(() => {
-    if (remaining <= 0) {
+    io.to(roomId).emit("waitingStart", { countdown });
+    if (countdown === 0) {
       clearInterval(interval);
-      io.to(roomId).emit("waitingUpdate", { countdown: 0 });
-
-      // Let the host emit startGame with initial state
-      const hostSocket = rooms[roomId]?.players[0];
-      if (hostSocket) {
-        hostSocket.emit("waitingStart", { countdown: 0 });
-        // NOTE: gameScene on host should send 'startGame' after countdown
-      }
-
-    } else {
-      io.to(roomId).emit("waitingStart", { countdown: remaining });
-      remaining--;
+      // ✅ host should emit startGame AFTER countdown
+      io.to(roomId).emit("triggerStartGameFromHost", {});
     }
+    countdown--;
   }, 1000);
 }
 
-// -------- Start Server --------
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+function generateRoomId() {
+  return Math.random().toString(36).substring(2, 7).toUpperCase();
+}
+
+server.listen(10099, () => {
+  console.log("🚀 Server running on http://localhost:10099");
 });
