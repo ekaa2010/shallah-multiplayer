@@ -9,7 +9,7 @@ app.use(cors());
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*", // allow all for testing
+    origin: "*", // allow all origins for testing
     methods: ["GET", "POST"]
   }
 });
@@ -22,8 +22,7 @@ io.on("connection", (socket) => {
   socket.on("createRoom", ({ playerId }) => {
     const roomId = generateRoomId();
     rooms[roomId] = {
-      players: [socket],
-      playerIds: [playerId]
+      players: [{ socket, playerId }],
     };
     socket.join(roomId);
     console.log(`✅ Room created: ${roomId} by player ${playerId}`);
@@ -33,31 +32,33 @@ io.on("connection", (socket) => {
   socket.on("joinRoom", ({ roomId, playerId }) => {
     const room = rooms[roomId];
     if (room && room.players.length === 1) {
-      room.players.push(socket);
-      room.playerIds.push(playerId);
+      room.players.push({ socket, playerId });
       socket.join(roomId);
-      console.log(`✅ Player joined room ${roomId}`);
+      console.log(`✅ Player joined room ${roomId} with ID ${playerId}`);
 
-      room.players.forEach(p =>
-        p.emit("playerJoined", { roomId, playerId })
+      // Notify both players
+      room.players.forEach(({ socket: pSocket }) =>
+        pSocket.emit("playerJoined", { roomId, playerId })
       );
 
       // Start countdown for game
       startCountdown(io, roomId);
     } else {
-      socket.emit("joinError", "Room full or does not exist.");
+      socket.emit("joinError", "❌ Room full or does not exist.");
     }
   });
 
   socket.on("disconnect", () => {
-    console.log("⚠️ A user disconnected");
+    console.log("⚠️ A user disconnected:", socket.id);
     for (const roomId in rooms) {
       const room = rooms[roomId];
-      room.players = room.players.filter(p => p.id !== socket.id);
+      room.players = room.players.filter(({ socket: p }) => p.id !== socket.id);
       if (room.players.length === 0) {
         delete rooms[roomId];
+        console.log(`🗑️ Room ${roomId} deleted (no players left)`);
       } else {
         io.to(roomId).emit("opponentDisconnected");
+        console.log(`⚠️ One player left room ${roomId}`);
       }
     }
   });
@@ -69,8 +70,8 @@ function startCountdown(io, roomId) {
     io.to(roomId).emit("waitingStart", { countdown });
     if (countdown === 0) {
       clearInterval(interval);
-      // ✅ host should emit startGame AFTER countdown
-      io.to(roomId).emit("triggerStartGameFromHost", {});
+      console.log(`🚀 Countdown done, triggering startGame in room ${roomId}`);
+      io.to(roomId).emit("triggerStartGameFromHost");
     }
     countdown--;
   }, 1000);
